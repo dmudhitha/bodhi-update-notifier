@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Bodhi Update Notifier
+Comment=Lightweight background update check & GUI notifier
+Exec=/home/mudhitha/System/bodhi-update-notifier/bodhi-update-notifier.sh
+Icon=software-update-available
+Terminal=false
+Categories=System;Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
