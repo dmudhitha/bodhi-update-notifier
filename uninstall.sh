@@ -9,6 +9,7 @@ INSTALL_DIR="$HOME/.local/bin"
 SHARE_DIR="$HOME/.local/share/bodhi-update-notifier"
 AUTOSTART_DIR="$HOME/.config/autostart"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+APP_MENU_DIR="$HOME/.local/share/applications"
 
 echo "=== Uninstalling Bodhi Update Notifier ==="
 
@@ -27,8 +28,11 @@ fi
 echo "-> Removing installed configurations and binaries..."
 rm -f "$SYSTEMD_USER_DIR/bodhi-update-notifier.service"
 rm -f "$AUTOSTART_DIR/bodhi-update-notifier.desktop"
+rm -f "$APP_MENU_DIR/bodhi-update-notifier.desktop"
 rm -f "$INSTALL_DIR/bodhi-update-notifier.sh"
-rm -f "/tmp/bodhi-update-notifier.lock"
+rm -f "$INSTALL_DIR/bodhi-update-settings.py"
+rm -f "$INSTALL_DIR/bodhi-update-tray.py"
+rm -f "/tmp/bodhi-update-notifier-*.lock"
 
 # 3. Reload systemd daemon
 echo "-> Reloading systemd user configuration..."
@@ -40,6 +44,7 @@ echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "-> Cleaning up logs and data..."
     rm -rf "$SHARE_DIR"
+    rm -rf "$HOME/.config/bodhi-update-notifier"
 fi
 
 echo ""

@@ -10,33 +10,42 @@ A lightweight, background software update utility designed specifically for Bodh
 
 ## 🌟 Features
 
-* **Silent & Resource Efficient**: Minimal CPU/memory footprints. Runs in the background and sleeps between check intervals.
-* **Smart Internet Check**: Verifies internet connectivity before checking, retrying after a short sleep if offline.
-* **Robust Cache Updating**: Silently tries to refresh package lists via `apt-get update`. Falls back gracefully to checking the existing local cache if passwordless sudo is not configured.
-* **Modern Zenity Prompts**: Uses GTK-based popup boxes with bold titles and action buttons to prompt the user.
-* **Interactive Terminal Upgrades**: Opens the `terminology` terminal (the default Bodhi terminal) for interactive upgrades. This ensures that any package configuration prompts can be safely answered.
-* **Graphical Progress Fallback**: Includes a configurable GUI-only progress bar option using `pkexec` and `zenity --progress`.
-* **Lock Protection**: Employs a process lock-file to prevent redundant notifications or overlapping checks.
+* **Silent & Resource Efficient**: Runs in the background with zero idle CPU load.
+* **Unified Package Checks**: Automatically checks for updates across **APT**, **Flatpak**, and **Snap** packaging systems.
+* **Modern Settings Panel**: A built-in graphical preferences panel to customize the checker's behaviors.
+* **Interactive Release Notes**: Double-clicking a package in the updates list fetches and shows the official changelog/release notes.
+* **Metered Bandwidth Warnings**: Automatically checks if your current network connection is metered, warning you before downloading large updates.
+* **Self-Healing & Repair**: Detects and offers to resolve package manager lock conflicts (e.g., stuck lock files).
+* **DND / Quiet Hours**: Configurable Quiet Hours during which notification alerts are suppressed, updating silently in the tray.
+* **Desktop Notifications**: Uses `notify-send` for transient system notifications.
 
 ---
 
 ## 📂 Files Included
 
-* **`bodhi-update-notifier.sh`**: The main Bash script doing the checking, logging, and GUI rendering.
+* **`bodhi-update-notifier.sh`**: The main Bash command router (Daemon / GUI / Diagnostics).
+* **`bodhi-update-tray.py`**: Python PyGObject companion applet displaying status in the system tray.
 * **`bodhi-update-notifier.service`**: Systemd user service configuration file.
-* **`bodhi-update-notifier.desktop`**: X11/Desktop autostart launcher configuration file.
+* **`bodhi-update-notifier.desktop`**: Desktop autostart configuration file.
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Configuration & GUI Commands
 
-Open `bodhi-update-notifier.sh` and customize these variables at the top:
+Settings are saved in `~/.config/bodhi-update-notifier/config.conf`. You can customize them using the GUI or command-line:
 
-```bash
-CHECK_INTERVAL="4h"       # Check interval (e.g., 30m, 4h, 12h, 1d)
-PROGRESS_MODE="terminal"  # "terminal" (interactive upgrade) or "zenity" (progress bar GUI)
-LOG_FILE="$HOME/.local/share/bodhi-update-notifier/notifier.log"
-```
+* **Show Update Preferences (Settings Dashboard)**:
+  ```bash
+  /home/mudhitha/System/bodhi-update-notifier/bodhi-update-notifier.sh --settings
+  ```
+* **Repair Package Manager (Resolve Locks)**:
+  ```bash
+  /home/mudhitha/System/bodhi-update-notifier/bodhi-update-notifier.sh --repair
+  ```
+* **Show Update List (Changelogs)**:
+  ```bash
+  /home/mudhitha/System/bodhi-update-notifier/bodhi-update-notifier.sh --show-details
+  ```
 
 ---
 

@@ -11,6 +11,7 @@ INSTALL_DIR="$HOME/.local/bin"
 SHARE_DIR="$HOME/.local/share/bodhi-update-notifier"
 AUTOSTART_DIR="$HOME/.config/autostart"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+APP_MENU_DIR="$HOME/.local/share/applications"
 
 # Get the directory of the current script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,11 +23,20 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$SHARE_DIR"
 mkdir -p "$AUTOSTART_DIR"
 mkdir -p "$SYSTEMD_USER_DIR"
+mkdir -p "$APP_MENU_DIR"
 
-# 2. Copy the main script and make it executable
+# 2. Copy the main script, settings app, and system tray applet
 echo "-> Copying update notifier script..."
 cp "$SCRIPT_DIR/bodhi-update-notifier.sh" "$INSTALL_DIR/bodhi-update-notifier.sh"
 chmod +x "$INSTALL_DIR/bodhi-update-notifier.sh"
+
+echo "-> Copying settings dashboard..."
+cp "$SCRIPT_DIR/bodhi-update-settings.py" "$INSTALL_DIR/bodhi-update-settings.py"
+chmod +x "$INSTALL_DIR/bodhi-update-settings.py"
+
+echo "-> Copying system tray applet..."
+cp "$SCRIPT_DIR/bodhi-update-tray.py" "$INSTALL_DIR/bodhi-update-tray.py"
+chmod +x "$INSTALL_DIR/bodhi-update-tray.py"
 
 # 3. Copy resources (logo)
 if [ -f "$SCRIPT_DIR/bodhi_update_logo.jpg" ]; then
@@ -67,6 +77,21 @@ StartupNotify=false
 X-GNOME-Autostart-enabled=true
 EOF
 chmod +x "$AUTOSTART_DIR/bodhi-update-notifier.desktop"
+
+# 5b. Generate and copy the applications menu shortcut dynamically
+echo "-> Generating applications menu shortcut..."
+cat <<EOF > "$APP_MENU_DIR/bodhi-update-notifier.desktop"
+[Desktop Entry]
+Type=Application
+Name=Bodhi Update Notifier
+Comment=Check and install Bodhi software updates
+Exec=$INSTALL_DIR/bodhi-update-notifier.sh --show-details
+Icon=software-update-available
+Terminal=false
+Categories=System;PackageManager;Utility;
+StartupNotify=true
+EOF
+chmod +x "$APP_MENU_DIR/bodhi-update-notifier.desktop"
 
 # 6. Enable and start the systemd user service
 echo "-> Enabling and starting systemd user service..."
