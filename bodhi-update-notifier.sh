@@ -206,7 +206,7 @@ repair_package_manager() {
     local cmd="echo '=== BODHI PACKAGE MANAGER REPAIR ==='; echo; echo 'Clearing locks and running self-healing diagnostics...'; sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock; sudo dpkg --configure -a; sudo apt-get install -f; echo; echo '--> Repair sequence completed!'; echo 'Press [Enter] to close this window.'; read -r"
     
     if [ "$term_emu" = "terminology" ]; then
-        terminology -T "Bodhi Package Repair" --hold -e bash -c "$cmd" &
+        terminology -T "Bodhi Package Repair" -e bash -c "$cmd" &
     elif [ -n "$term_emu" ]; then
         "$term_emu" -e bash -c "$cmd" &
     else
@@ -293,7 +293,7 @@ install_updates() {
             upgrade_cmd="${upgrade_cmd}echo '=== Upgrades Finished! ==='; echo 'Press [Enter] to close this window.'; read -r"
             
             if [ "$term_emu" = "terminology" ]; then
-                terminology -T "Bodhi System Update" --hold -e bash -c "$upgrade_cmd" &
+                terminology -T "Bodhi System Update" -e bash -c "$upgrade_cmd" &
             elif [ "$term_emu" = "x-terminal-emulator" ]; then
                 x-terminal-emulator -e bash -c "$upgrade_cmd" &
             else
@@ -345,8 +345,123 @@ install_updates() {
     fi
 }
 
+# --- Feature 6: Interactive Manual Check with Progress Bar ---
+run_manual_check_gui() {
+    log_message "INFO" "Manual GUI update check requested."
+    
+    (
+        echo "10" ; echo "# Checking internet connection..."
+        if ! check_internet; then
+            echo "# No internet connection detected."
+            sleep 2
+            exit 1
+        fi
+        
+        echo "30" ; echo "# Refreshing package indexes..."
+        if sudo -n apt-get update >/dev/null 2>&1; then
+            log_message "INFO" "Package index refreshed via sudo."
+        fi
+        
+        echo "60" ; echo "# Checking APT system updates..."
+        local apt_count=0
+        local apt_list=""
+        if [ "$CHECK_APT" = "true" ]; then
+            while read -r line; do
+                pkg=$(echo "$line" | awk '{print $2}')
+                ver=$(echo "$line" | awk '{print $4}' | sed 's/[(]//g')
+                if [ -n "$pkg" ]; then
+                    apt_list="${apt_list}APT|$pkg|$ver\n"
+                    apt_count=$((apt_count + 1))
+                fi
+            done < <(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ')
+        fi
+        
+        echo "80" ; echo "# Checking Flatpak & Snap updates..."
+        local flatpak_count=0
+        local flatpak_list=""
+        if [ "$CHECK_FLATPAK" = "true" ] && command -v flatpak >/dev/null 2>&1; then
+            while read -r line; do
+                pkg=$(echo "$line" | awk '{print $1}')
+                branch=$(echo "$line" | awk '{print $2}')
+                remote=$(echo "$line" | awk '{print $4}')
+                if [ -n "$pkg" ] && [ "$pkg" != "ID" ]; then
+                    flatpak_list="${flatpak_list}Flatpak|$pkg|$branch ($remote)\n"
+                    flatpak_count=$((flatpak_count + 1))
+                fi
+            done < <(flatpak update --check 2>/dev/null || true)
+        fi
+        
+        local snap_count=0
+        local snap_list=""
+        if [ "$CHECK_SNAP" = "true" ] && command -v snap >/dev/null 2>&1; then
+            while read -r line; do
+                pkg=$(echo "$line" | awk '{print $1}')
+                ver=$(echo "$line" | awk '{print $2}')
+                if [ -n "$pkg" ] && [ "$pkg" != "Name" ]; then
+                    snap_list="${snap_list}Snap|$pkg|$ver\n"
+                    snap_count=$((snap_count + 1))
+                fi
+            done < <(snap refresh --list 2>/dev/null || true)
+        fi
+        
+        echo -ne "$apt_list$flatpak_list$snap_list" > "$UPDATES_LIST_FILE"
+        echo "100" ; echo "# Check complete!"
+        sleep 1
+    ) | zenity --progress \
+        --title="Bodhi Update Utility" \
+        --text="Checking for software updates..." \
+        --percentage=0 \
+        --auto-close \
+        --width=400 2>/dev/null
+        
+    local exit_code=$?
+    
+    # Signal daemon process to reload config / update status
+    local pid=$(cat "$LOCK_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill -SIGUSR1 "$pid"
+    fi
+    
+    if [ $exit_code -eq 0 ]; then
+        local total_count=0
+        if [ -f "$UPDATES_LIST_FILE" ]; then
+            total_count=$(grep -c '|' "$UPDATES_LIST_FILE" 2>/dev/null || echo 0)
+        fi
+        
+        if [ "$total_count" -gt 0 ]; then
+            local zen_response
+            zen_response=$(zenity --question \
+                --title="Bodhi Update Utility" \
+                --text="<span font='11' weight='bold'>System Updates Available</span>\n\nFound <b>$total_count</b> software updates ready for installation.\n\nWould you like to install them now?" \
+                --icon-name="software-update-available" \
+                --ok-label="Install Now" \
+                --cancel-label="Remind Me Later" \
+                --extra-button="Show Details" \
+                --width=450 2>/dev/null)
+                
+            if [ $? -eq 0 ]; then
+                if [ "$zen_response" = "Show Details" ]; then
+                    show_details_dialog
+                else
+                    install_updates
+                fi
+            fi
+        else
+            zenity --info \
+                --title="Bodhi Update Utility" \
+                --text="<span font='11' weight='bold'>System Up to Date</span>\n\nNo software updates are currently available." \
+                --icon-name="emblem-synchronized" \
+                --width=350 2>/dev/null
+        fi
+    fi
+}
+
 # --- Command Line Argument Routing ---
 case "$1" in
+    --check-now)
+        run_manual_check_gui
+        exit 0
+        ;;
     --show-details)
         show_details_dialog
         exit 0
@@ -367,6 +482,7 @@ case "$1" in
         echo "Usage: $0 [OPTION]"
         echo "Options:"
         echo "  (none)            Start the background update checker daemon"
+        echo "  --check-now       Perform an interactive check with progress bar"
         echo "  --show-details    Display the Zenity list of available updates"
         echo "  --install-now     Launch the package upgrade terminal/GUI"
         echo "  --settings        Show the GUI Settings form"

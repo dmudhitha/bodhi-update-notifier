@@ -49,32 +49,39 @@ Settings are saved in `~/.config/bodhi-update-notifier/config.conf`. You can cus
 
 ---
 
-## 🚀 Quick Setup & Installation
+## 🚀 Setup & Installation
 
-### 1. Allow Silent Background Checks (Recommended)
-Allow the background script to refresh package indexes without prompting you for a password every cycle:
+### Option A: Install via `.deb` Package (Recommended)
+Installing the `.deb` package is the simplest and most automated method. It automatically installs binaries to `/usr/bin/`, sets up the system tools menu shortcut, and configures `/etc/sudoers.d/bodhi-update-notifier` so the background daemon can fetch new package lists silently without asking for a password.
+
 ```bash
-sudo visudo /etc/sudoers.d/bodhi-update-notifier
-```
-Add the following line at the bottom, then save and close:
-```text
-%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
+sudo apt install /home/mudhitha/System/bodhi-update-notifier/bodhi-update-notifier_1.0-1_all.deb
 ```
 
-### 2. Run the Installer
-Run the installation script to copy binaries, register settings, and enable both the Systemd user service and Desktop autostart configurations automatically:
-```bash
-/home/mudhitha/System/bodhi-update-notifier/install.sh
-```
+### Option B: Local User-Space Setup (`install.sh`)
+If you prefer running the script strictly from your user home directory:
+
+1. Allow silent background package list refreshes:
+   ```bash
+   echo "%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" | sudo tee /etc/sudoers.d/bodhi-update-notifier >/dev/null && sudo chmod 0440 /etc/sudoers.d/bodhi-update-notifier
+   ```
+2. Run the local installer script:
+   ```bash
+   /home/mudhitha/System/bodhi-update-notifier/install.sh
+   ```
 
 ---
 
 ## 🗑️ Uninstallation
 
-If you wish to cleanly remove the application and stop the background services, simply run:
-```bash
-/home/mudhitha/System/bodhi-update-notifier/uninstall.sh
-```
+* **If installed via `.deb` package**:
+  ```bash
+  sudo apt remove bodhi-update-notifier
+  ```
+* **If installed via `install.sh`**:
+  ```bash
+  /home/mudhitha/System/bodhi-update-notifier/uninstall.sh
+  ```
 
 ---
 

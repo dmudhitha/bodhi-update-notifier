@@ -114,7 +114,9 @@ cat <<EOF > "$BUILD_DIR/DEBIAN/postinst"
 #!/bin/sh
 set -e
 if [ "\$1" = "configure" ]; then
-    echo "Installing configurations for bodhi-update-notifier..."
+    echo "Configuring passwordless apt-get update for silent background checks..."
+    echo "%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" > /etc/sudoers.d/bodhi-update-notifier
+    chmod 0440 /etc/sudoers.d/bodhi-update-notifier
 fi
 EOF
 chmod 755 "$BUILD_DIR/DEBIAN/postinst"
@@ -129,6 +131,7 @@ if [ "\$1" = "remove" ]; then
     pkill -f "bodhi-update-notifier.sh" || true
     pkill -f "bodhi-update-tray.py" || true
     rm -f /tmp/bodhi-update-notifier-*.lock || true
+    rm -f /etc/sudoers.d/bodhi-update-notifier || true
 fi
 EOF
 chmod 755 "$BUILD_DIR/DEBIAN/prerm"

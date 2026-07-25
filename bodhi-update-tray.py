@@ -148,18 +148,8 @@ class BodhiUpdateIndicator:
         subprocess.Popen([NOTIFIER_PATH, "--install-now"])
 
     def on_check_now(self, widget):
-        pid = self.get_bash_pid()
-        if pid:
-            try:
-                # Send SIGUSR1 to awake the background bash process from sleep
-                os.kill(pid, signal.SIGUSR1)
-                # Show standard temporary zenity notification
-                subprocess.Popen(["zenity", "--notification", "--text=Checking for updates...", "--timeout=2"])
-            except Exception:
-                pass
-        else:
-            # If the daemon is dead, start it up again
-            subprocess.Popen([NOTIFIER_PATH])
+        # Trigger interactive progress check in bash
+        subprocess.Popen([NOTIFIER_PATH, "--check-now"])
 
     def on_repair(self, widget):
         # Launch package manager diagnostics and repair
