@@ -30,7 +30,8 @@ class SettingsWindow(Gtk.Window):
             "QUIET_HOURS_START": "21:00",
             "QUIET_HOURS_END": "08:00",
             "METERED_WARNING": "true",
-            "METERED_THRESHOLD_MB": "100"
+            "METERED_THRESHOLD_MB": "100",
+            "SILENT_AUTO_UPDATE": "false"
         }
         
         self.load_config()
@@ -64,6 +65,7 @@ class SettingsWindow(Gtk.Window):
         self.config["QUIET_HOURS_END"] = self.entry_qh_end.get_text().strip()
         self.config["METERED_WARNING"] = "true" if self.check_metered.get_active() else "false"
         self.config["METERED_THRESHOLD_MB"] = self.entry_metered_size.get_text().strip()
+        self.config["SILENT_AUTO_UPDATE"] = "true" if self.check_silent.get_active() else "false"
         
         # Write to file
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
@@ -192,6 +194,16 @@ class SettingsWindow(Gtk.Window):
         metered_box.pack_start(self.check_metered, False, False, 0)
         metered_box.pack_start(size_box, False, False, 0)
         grid.attach(metered_box, 1, row, 1, 1)
+        row += 1
+        
+        # 6. Silent Auto-Updates
+        lbl_silent = Gtk.Label(label="Silent Auto-Update:")
+        lbl_silent.set_alignment(0, 0.5)
+        grid.attach(lbl_silent, 0, row, 1, 1)
+        
+        self.check_silent = Gtk.CheckButton(label="Enable Silent Auto-Updates (Automatic background upgrade)")
+        self.check_silent.set_active(self.config.get("SILENT_AUTO_UPDATE", "false") == "true")
+        grid.attach(self.check_silent, 1, row, 1, 1)
         row += 1
         
         # Action Buttons

@@ -24,6 +24,7 @@ QUIET_HOURS_START="21:00"
 QUIET_HOURS_END="08:00"
 METERED_WARNING="true"
 METERED_THRESHOLD_MB="100"
+SILENT_AUTO_UPDATE="false"
 
 # Ensure log and config folders exist
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +51,7 @@ QUIET_HOURS_START="$QUIET_HOURS_START"
 QUIET_HOURS_END="$QUIET_HOURS_END"
 METERED_WARNING="$METERED_WARNING"
 METERED_THRESHOLD_MB="$METERED_THRESHOLD_MB"
+SILENT_AUTO_UPDATE="$SILENT_AUTO_UPDATE"
 EOF
 }
 
@@ -70,6 +72,7 @@ load_config() {
                 QUIET_HOURS_END) QUIET_HOURS_END="$val" ;;
                 METERED_WARNING) METERED_WARNING="$val" ;;
                 METERED_THRESHOLD_MB) METERED_THRESHOLD_MB="$val" ;;
+                SILENT_AUTO_UPDATE) SILENT_AUTO_UPDATE="$val" ;;
             esac
         done < "$CONFIG_FILE"
     else
@@ -94,27 +97,34 @@ show_changelog() {
     local pkg="$2"
     local temp_changelog="/tmp/bodhi-update-changelog-$UID.txt"
     
-    echo "Retrieving release notes for $pkg... Please wait." > "$temp_changelog"
+    log_message "INFO" "Fetching release notes for $source package: $pkg"
     
-    (
-        if [ "$source" = "APT" ]; then
-            apt-get changelog "$pkg" 2>/dev/null > "$temp_changelog" || echo "No detailed APT changelog available for $pkg. This might be a third-party repository." > "$temp_changelog"
-        elif [ "$source" = "Flatpak" ]; then
-            flatpak info "$pkg" 2>/dev/null | grep -A 10 -i "changes" > "$temp_changelog" || echo "No detailed Flatpak changelog available." > "$temp_changelog"
-        elif [ "$source" = "Snap" ]; then
-            snap info "$pkg" 2>/dev/null | grep -A 10 -i "channels" > "$temp_changelog" || echo "No detailed Snap changelog available." > "$temp_changelog"
+    if [ "$source" = "APT" ]; then
+        # Try official changelog
+        apt-get changelog "$pkg" 2>/dev/null > "$temp_changelog"
+        
+        # Fallback to apt-cache show for PPA/third-party packages (e.g. VS Code, Chrome)
+        if [ $? -ne 0 ] || [ ! -s "$temp_changelog" ]; then
+            echo "==================================================" > "$temp_changelog"
+            echo "PACKAGE INFORMATION & DESCRIPTION: $pkg" >> "$temp_changelog"
+            echo "==================================================" >> "$temp_changelog"
+            echo "" >> "$temp_changelog"
+            apt-cache show "$pkg" 2>/dev/null >> "$temp_changelog" || echo "No package information available for $pkg." >> "$temp_changelog"
         fi
-    ) &
-    local fetch_pid=$!
+    elif [ "$source" = "Flatpak" ]; then
+        flatpak info "$pkg" 2>/dev/null > "$temp_changelog"
+        if [ $? -ne 0 ] || [ ! -s "$temp_changelog" ]; then
+            echo "No detailed Flatpak info available for '$pkg'." > "$temp_changelog"
+        fi
+    elif [ "$source" = "Snap" ]; then
+        snap info "$pkg" 2>/dev/null > "$temp_changelog"
+        if [ $? -ne 0 ] || [ ! -s "$temp_changelog" ]; then
+            echo "No detailed Snap info available for '$pkg'." > "$temp_changelog"
+        fi
+    fi
     
-    # Wait indicator
-    zenity --progress --title="Fetching Release Notes" --text="Retrieving package details for $pkg..." --pulsate --auto-close --timeout=10 2>/dev/null &
-    local prog_pid=$!
-    
-    wait $fetch_pid 2>/dev/null || true
-    kill $prog_pid 2>/dev/null || true
-    
-    zenity --text-info --title="Release Notes: $pkg" \
+    zenity --text-info \
+        --title="Release Notes / Package Details: $pkg" \
         --filename="$temp_changelog" \
         --width=650 --height=450 \
         --ok-label="Back to List" 2>/dev/null
@@ -141,7 +151,7 @@ show_details_dialog() {
         local response
         response=$(zenity --list \
             --title="Available System Updates" \
-            --text="Double-click a package to view its release notes/changelog:" \
+            --text="Select a package and click 'View Release Notes', or double-click a package row:" \
             --column="Repository" --column="Package/App Name" --column="Available Version" \
             "${zenity_args[@]}" \
             --print-column=ALL \
@@ -155,10 +165,14 @@ show_details_dialog() {
         if [ "$response" = "Install Updates" ]; then
             install_updates
             break
-        elif [ $exit_status -eq 0 ] && [ -n "$response" ]; then
-            local sel_source=$(echo "$response" | cut -d'|' -f1)
-            local sel_pkg=$(echo "$response" | cut -d'|' -f2)
-            show_changelog "$sel_source" "$sel_pkg"
+        elif [ $exit_status -eq 0 ]; then
+            if [ -n "$response" ]; then
+                local sel_source=$(echo "$response" | cut -d'|' -f1)
+                local sel_pkg=$(echo "$response" | cut -d'|' -f2)
+                show_changelog "$sel_source" "$sel_pkg"
+            else
+                zenity --info --title="Bodhi Update Utility" --text="Please click to select a package from the list first before viewing release notes." --width=360 2>/dev/null
+            fi
         else
             break
         fi
@@ -290,7 +304,13 @@ install_updates() {
             if command -v snap >/dev/null 2>&1; then
                 upgrade_cmd="${upgrade_cmd}echo '--> Upgrading Snap applications...'; sudo snap refresh; echo;"
             fi
-            upgrade_cmd="${upgrade_cmd}echo '=== Upgrades Finished! ==='; echo 'Press [Enter] to close this window.'; read -r"
+            
+            # Post-installation verification step inside terminal
+            upgrade_cmd="${upgrade_cmd}echo '=== VERIFYING INSTALLED UPDATES ==='; echo '--> Re-checking package repositories...';"
+            upgrade_cmd="${upgrade_cmd}REMAIN_COUNT=\$(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ' | wc -l);"
+            upgrade_cmd="${upgrade_cmd}if [ \$REMAIN_COUNT -eq 0 ]; then echo -n '' > '$UPDATES_LIST_FILE'; echo '✔ All updates were installed successfully with 0 errors! Your system is up to date.'; else echo \"⚠️ Upgrade finished. \$REMAIN_COUNT package(s) still remaining.\"; fi; echo;"
+            upgrade_cmd="${upgrade_cmd}if [ -f '$LOCK_FILE' ]; then kill -SIGUSR1 \$(cat '$LOCK_FILE' 2>/dev/null) 2>/dev/null || true; fi;"
+            upgrade_cmd="${upgrade_cmd}echo 'Press [Enter] to close this window.'; read -r"
             
             if [ "$term_emu" = "terminology" ]; then
                 terminology -T "Bodhi System Update" -e bash -c "$upgrade_cmd" &
@@ -299,7 +319,6 @@ install_updates() {
             else
                 "$term_emu" -e bash -c "$upgrade_cmd" &
             fi
-            sleep 15
         else
             log_message "ERROR" "No suitable terminal emulator found!"
             zenity --error --title="Bodhi Update Utility" --text="Could not open terminal emulator for the update." --width=350 2>/dev/null
@@ -331,9 +350,16 @@ install_updates() {
                 
             local pistatus=${PIPESTATUS[0]}
             if [ "$pistatus" -eq 0 ]; then
-                log_message "INFO" "Updates installed successfully."
-                echo -n "" > "$UPDATES_LIST_FILE"
-                zenity --info --title="Bodhi Update Utility" --text="System updates installed successfully." --width=300 2>/dev/null
+                log_message "INFO" "Updates installed via Zenity mode. Verifying..."
+                local remain_count=$(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ' | wc -l)
+                if [ "$remain_count" -eq 0 ]; then
+                    log_message "INFO" "Updates installed successfully with 0 remaining."
+                    echo -n "" > "$UPDATES_LIST_FILE"
+                    zenity --info --title="Bodhi Update Utility" --text="<span font='11' weight='bold'>Update Complete</span>\n\nAll updates were installed successfully without errors! Your system is now up to date." --icon-name="emblem-synchronized" --width=380 2>/dev/null
+                else
+                    log_message "WARNING" "Updates finished, but $remain_count package(s) remain."
+                    zenity --warning --title="Bodhi Update Utility" --text="Updates finished, but <b>$remain_count</b> package(s) could not be upgraded or are held back." --width=380 2>/dev/null
+                fi
             else
                 log_message "ERROR" "Upgrade failed or was cancelled. Exit code: $pistatus"
                 zenity --error --title="Bodhi Update Utility" --text="Update failed or was cancelled. Please check log for details." --width=350 2>/dev/null
@@ -342,6 +368,12 @@ install_updates() {
             log_message "ERROR" "pkexec not found, cannot run graphical progress mode!"
             zenity --error --title="Bodhi Update Utility" --text="Authentication agent (pkexec) not found." --width=350 2>/dev/null
         fi
+    fi
+
+    # Signal daemon process to reload config / update tray status icon
+    local pid=$(cat "$LOCK_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill -SIGUSR1 "$pid"
     fi
 }
 
@@ -438,13 +470,12 @@ run_manual_check_gui() {
                 --cancel-label="Remind Me Later" \
                 --extra-button="Show Details" \
                 --width=450 2>/dev/null)
+            local exit_code=$?
                 
-            if [ $? -eq 0 ]; then
-                if [ "$zen_response" = "Show Details" ]; then
-                    show_details_dialog
-                else
-                    install_updates
-                fi
+            if [ "$zen_response" = "Show Details" ]; then
+                show_details_dialog
+            elif [ $exit_code -eq 0 ]; then
+                install_updates
             fi
         else
             zenity --info \
@@ -609,13 +640,62 @@ while true; do
     TOTAL_COUNT=$((APT_COUNT + FLATPAK_COUNT + SNAP_COUNT))
     echo -ne "$APT_LIST$FLATPAK_LIST$SNAP_LIST" > "$UPDATES_LIST_FILE"
 
+# --- Feature 7: Silent Auto-Updates Engine ---
+perform_silent_auto_update() {
+    log_message "INFO" "Executing silent auto-update sequence..."
+    send_notification "Bodhi Update Utility" "Starting silent background software update..."
+    
+    # 1. Update APT
+    if [ "$CHECK_APT" = "true" ]; then
+        log_message "INFO" "Silent updating APT packages..."
+        if sudo -n apt-get upgrade -y >/dev/null 2>&1 && sudo -n apt-get autoremove -y >/dev/null 2>&1; then
+            log_message "INFO" "APT packages silently upgraded via passwordless sudo."
+        elif command -v pkexec >/dev/null 2>&1; then
+            pkexec env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y >/dev/null 2>&1 || true
+            pkexec env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # 2. Update Flatpak
+    if [ "$CHECK_FLATPAK" = "true" ] && command -v flatpak >/dev/null 2>&1; then
+        log_message "INFO" "Silent updating Flatpak packages..."
+        flatpak update -y >/dev/null 2>&1 || true
+    fi
+    
+    # 3. Update Snap
+    if [ "$CHECK_SNAP" = "true" ] && command -v snap >/dev/null 2>&1; then
+        log_message "INFO" "Silent updating Snap packages..."
+        sudo -n snap refresh >/dev/null 2>&1 || pkexec snap refresh >/dev/null 2>&1 || true
+    fi
+    
+    # 4. Verify post-update state
+    local remain_count=$(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ' | wc -l)
+    if [ "$remain_count" -eq 0 ]; then
+        log_message "INFO" "Silent auto-update finished. 0 updates remaining."
+        echo -n "" > "$UPDATES_LIST_FILE"
+        send_notification "System Updated" "Silent auto-update completed successfully. System is up to date."
+    else
+        log_message "WARNING" "Silent auto-update finished, $remain_count package(s) remain."
+    fi
+    
+    # Signal daemon / tray applet
+    local pid=$(cat "$LOCK_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill -SIGUSR1 "$pid"
+    fi
+}
+
     if [ "$TOTAL_COUNT" -gt 0 ]; then
         log_message "INFO" "Updates found! Total: $TOTAL_COUNT (APT: $APT_COUNT, Flatpak: $FLATPAK_COUNT, Snap: $SNAP_COUNT)"
         
-        # Ensure DISPLAY is set
-        if [ -z "$DISPLAY" ]; then
-            export DISPLAY=":0.0"
-        fi
+        if [ "$SILENT_AUTO_UPDATE" = "true" ]; then
+            log_message "INFO" "Silent Auto-Update enabled. Performing automatic upgrade..."
+            perform_silent_auto_update
+        else
+            # Ensure DISPLAY is set
+            if [ -z "$DISPLAY" ]; then
+                export DISPLAY=":0.0"
+            fi
         
         # 4. Trigger Desktop Notification (if count changed)
         if [ "$TOTAL_COUNT" -ne "$LAST_NOTIFIED_COUNT" ]; then
@@ -654,16 +734,16 @@ while true; do
                     --cancel-label="Remind Me Later" \
                     --extra-button="Show Details" \
                     --width=450 2>/dev/null)
+                local exit_code=$?
                 
-                if [ $? -eq 0 ]; then
-                    if [ "$zen_response" = "Show Details" ]; then
-                        show_details_dialog
-                    else
-                        install_updates
-                    fi
+                if [ "$zen_response" = "Show Details" ]; then
+                    show_details_dialog
+                elif [ $exit_code -eq 0 ]; then
+                    install_updates
                 fi
             fi
         fi
+    fi
     else
         log_message "DEBUG" "No updates available. System is up to date."
         LAST_NOTIFIED_COUNT=0
