@@ -1,0 +1,12 @@
+# Ignore Debian package files and build directories
+*.deb
+build-deb/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary files & logs
+*.log
+*.tmp

@@ -289,35 +289,75 @@ send_notification() {
     fi
 }
 
+# Ensure DISPLAY and XAUTHORITY are exported for GUI & background daemon calls
+export DISPLAY="${DISPLAY:-:0.0}"
+[ -z "$XAUTHORITY" ] && [ -f "$HOME/.Xauthority" ] && export XAUTHORITY="$HOME/.Xauthority"
+
 install_updates() {
     log_message "INFO" "User initiated update installation. Mode: $PROGRESS_MODE"
     
+    # Ensure DISPLAY and XAUTHORITY are set
+    export DISPLAY="${DISPLAY:-:0.0}"
+    [ -z "$XAUTHORITY" ] && [ -f "$HOME/.Xauthority" ] && export XAUTHORITY="$HOME/.Xauthority"
+
     if [ "$PROGRESS_MODE" = "terminal" ]; then
         local term_emu=$(find_terminal)
         if [ -n "$term_emu" ]; then
             log_message "INFO" "Launching terminal: $term_emu"
-            local upgrade_cmd="echo '=== STARTING BODHI SOFTWARE UPGRADES ==='; echo;"
-            upgrade_cmd="${upgrade_cmd}echo '--> Upgrading APT system packages...'; sudo apt-get upgrade -y && sudo apt-get autoremove -y; echo;"
-            if command -v flatpak >/dev/null 2>&1; then
-                upgrade_cmd="${upgrade_cmd}echo '--> Upgrading Flatpak applications...'; flatpak update -y; echo;"
-            fi
-            if command -v snap >/dev/null 2>&1; then
-                upgrade_cmd="${upgrade_cmd}echo '--> Upgrading Snap applications...'; sudo snap refresh; echo;"
-            fi
+            local runner_script="/tmp/bodhi-upgrade-runner-$UID.sh"
             
-            # Post-installation verification step inside terminal
-            upgrade_cmd="${upgrade_cmd}echo '=== VERIFYING INSTALLED UPDATES ==='; echo '--> Re-checking package repositories...';"
-            upgrade_cmd="${upgrade_cmd}REMAIN_COUNT=\$(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ' | wc -l);"
-            upgrade_cmd="${upgrade_cmd}if [ \$REMAIN_COUNT -eq 0 ]; then echo -n '' > '$UPDATES_LIST_FILE'; echo '✔ All updates were installed successfully with 0 errors! Your system is up to date.'; else echo \"⚠️ Upgrade finished. \$REMAIN_COUNT package(s) still remaining.\"; fi; echo;"
-            upgrade_cmd="${upgrade_cmd}if [ -f '$LOCK_FILE' ]; then kill -SIGUSR1 \$(cat '$LOCK_FILE' 2>/dev/null) 2>/dev/null || true; fi;"
-            upgrade_cmd="${upgrade_cmd}echo 'Press [Enter] to close this window.'; read -r"
+            cat <<EOF > "$runner_script"
+#!/usr/bin/env bash
+echo '=================================================='
+echo '       BODHI LINUX SOFTWARE UPDATE MANAGER        '
+echo '=================================================='
+echo
+
+echo '--> Upgrading system APT packages...'
+sudo apt-get upgrade -y && sudo apt-get autoremove -y
+echo
+
+if command -v flatpak >/dev/null 2>&1; then
+    echo '--> Upgrading Flatpak applications...'
+    flatpak update -y
+    echo
+fi
+
+if command -v snap >/dev/null 2>&1; then
+    echo '--> Upgrading Snap applications...'
+    sudo snap refresh
+    echo
+fi
+
+echo '=================================================='
+echo '            VERIFYING INSTALLED UPDATES           '
+echo '=================================================='
+echo '--> Re-checking package repositories...'
+REMAIN_COUNT=\$(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ' | wc -l)
+
+if [ "\$REMAIN_COUNT" -eq 0 ]; then
+    echo -n "" > "$UPDATES_LIST_FILE"
+    echo "✔ All updates were installed successfully with 0 errors! Your system is up to date."
+else
+    echo "⚠️ Upgrade finished. \$REMAIN_COUNT package(s) still remaining."
+fi
+echo
+
+if [ -f "$LOCK_FILE" ]; then
+    kill -SIGUSR1 \$(cat "$LOCK_FILE" 2>/dev/null) 2>/dev/null || true
+fi
+
+echo 'Press [Enter] to close this window.'
+read -r
+EOF
+            chmod +x "$runner_script"
             
             if [ "$term_emu" = "terminology" ]; then
-                terminology -T "Bodhi System Update" -e bash -c "$upgrade_cmd" &
+                terminology -T "Bodhi System Update" -e "$runner_script" &
             elif [ "$term_emu" = "x-terminal-emulator" ]; then
-                x-terminal-emulator -e bash -c "$upgrade_cmd" &
+                x-terminal-emulator -e "$runner_script" &
             else
-                "$term_emu" -e bash -c "$upgrade_cmd" &
+                "$term_emu" -e "$runner_script" &
             fi
         else
             log_message "ERROR" "No suitable terminal emulator found!"

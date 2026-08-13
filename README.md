@@ -34,6 +34,7 @@ A modern, lightweight, feature-packed software update manager and system tray no
 * **`build-deb.sh`**: Automated Debian package compilation script (`.deb`).
 * **`install.sh`**: User-space installer script.
 * **`uninstall.sh`**: Cleaner script for user-space installation.
+* **`.gitignore`**: Git configuration ignoring compiled `.deb` packages and build artifacts.
 
 ---
 
