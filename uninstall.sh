@@ -31,6 +31,7 @@ rm -f "$AUTOSTART_DIR/bodhi-update-notifier.desktop"
 rm -f "$APP_MENU_DIR/bodhi-update-notifier.desktop"
 rm -f "$INSTALL_DIR/bodhi-update-notifier.sh"
 rm -f "$INSTALL_DIR/bodhi-update-settings.py"
+rm -f "$INSTALL_DIR/bodhi-update-popup.py"
 rm -f "$INSTALL_DIR/bodhi-update-tray.py"
 rm -f "/tmp/bodhi-update-notifier-*.lock"
 

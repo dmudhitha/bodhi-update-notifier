@@ -29,6 +29,7 @@ A modern, lightweight, feature-packed software update manager and system tray no
 ## 📂 File Architecture
 
 * **`bodhi-update-notifier.sh`**: Core Bash daemon engine, CLI router, and GUI window launcher.
+* **`bodhi-update-popup.py`**: Native GTK3 update notification popup dialog with direct action triggers.
 * **`bodhi-update-settings.py`**: Native GTK3 preferences application (`--settings`).
 * **`bodhi-update-tray.py`**: PyGObject AppIndicator companion applet for system tray monitoring.
 * **`build-deb.sh`**: Automated Debian package compilation script (`.deb`).

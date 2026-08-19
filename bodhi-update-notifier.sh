@@ -162,7 +162,7 @@ show_details_dialog() {
             
         local exit_status=$?
         
-        if [ "$response" = "Install Updates" ]; then
+        if [ "$response" = "Install Updates" ] || [ "$response" = "Install Now" ]; then
             install_updates
             break
         elif [ $exit_status -eq 0 ]; then
@@ -314,7 +314,7 @@ echo '=================================================='
 echo
 
 echo '--> Upgrading system APT packages...'
-sudo apt-get upgrade -y && sudo apt-get autoremove -y
+sudo apt-get dist-upgrade -y && sudo apt-get autoremove -y
 echo
 
 if command -v flatpak >/dev/null 2>&1; then
@@ -368,7 +368,7 @@ EOF
         if command -v pkexec >/dev/null 2>&1; then
             (
                 echo "10" ; echo "# Updating APT packages..."
-                pkexec env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
+                pkexec env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y && \
                 pkexec env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
                 
                 if command -v flatpak >/dev/null 2>&1; then
@@ -395,6 +395,9 @@ EOF
                 if [ "$remain_count" -eq 0 ]; then
                     log_message "INFO" "Updates installed successfully with 0 remaining."
                     echo -n "" > "$UPDATES_LIST_FILE"
+                    if [ -f "$LOCK_FILE" ]; then
+                        kill -SIGUSR1 $(cat "$LOCK_FILE" 2>/dev/null) 2>/dev/null || true
+                    fi
                     zenity --info --title="Bodhi Update Utility" --text="<span font='11' weight='bold'>Update Complete</span>\n\nAll updates were installed successfully without errors! Your system is now up to date." --icon-name="emblem-synchronized" --width=380 2>/dev/null
                 else
                     log_message "WARNING" "Updates finished, but $remain_count package(s) remain."
@@ -409,15 +412,39 @@ EOF
             zenity --error --title="Bodhi Update Utility" --text="Authentication agent (pkexec) not found." --width=350 2>/dev/null
         fi
     fi
+}
 
-    # Signal daemon process to reload config / update tray status icon
-    local pid=$(cat "$LOCK_FILE" 2>/dev/null)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        kill -SIGUSR1 "$pid"
+# --- Feature 6: Update Notification Popup Helper ---
+show_update_popup() {
+    local count="$1"
+    local warning="$2"
+    
+    if command -v python3 >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/bodhi-update-popup.py" ]; then
+        python3 "$SCRIPT_DIR/bodhi-update-popup.py" "$count" "$warning"
+    elif command -v python3 >/dev/null 2>&1 && [ -f "/usr/bin/bodhi-update-popup.py" ]; then
+        python3 "/usr/bin/bodhi-update-popup.py" "$count" "$warning"
+    else
+        # Fallback to zenity question
+        local zen_response
+        zen_response=$(zenity --question \
+            --title="Bodhi Update Utility" \
+            --text="<span font='11' weight='bold'>System Updates Available</span>\n\nThere are <b>$count</b> software updates ready for your Bodhi Linux system.$warning\n\nWould you like to install them now?" \
+            --icon-name="software-update-available" \
+            --ok-label="Install Now" \
+            --cancel-label="Remind Me Later" \
+            --extra-button="Show Details" \
+            --width=450 2>/dev/null)
+        local exit_code=$?
+        
+        if [ "$zen_response" = "Show Details" ]; then
+            show_details_dialog
+        elif [ "$zen_response" = "Install Now" ] || [ $exit_code -eq 0 ]; then
+            install_updates
+        fi
     fi
 }
 
-# --- Feature 6: Interactive Manual Check with Progress Bar ---
+# --- Feature 7: Interactive Manual Check with Progress Bar ---
 run_manual_check_gui() {
     log_message "INFO" "Manual GUI update check requested."
     
@@ -501,22 +528,7 @@ run_manual_check_gui() {
         fi
         
         if [ "$total_count" -gt 0 ]; then
-            local zen_response
-            zen_response=$(zenity --question \
-                --title="Bodhi Update Utility" \
-                --text="<span font='11' weight='bold'>System Updates Available</span>\n\nFound <b>$total_count</b> software updates ready for installation.\n\nWould you like to install them now?" \
-                --icon-name="software-update-available" \
-                --ok-label="Install Now" \
-                --cancel-label="Remind Me Later" \
-                --extra-button="Show Details" \
-                --width=450 2>/dev/null)
-            local exit_code=$?
-                
-            if [ "$zen_response" = "Show Details" ]; then
-                show_details_dialog
-            elif [ $exit_code -eq 0 ]; then
-                install_updates
-            fi
+            show_update_popup "$total_count" ""
         else
             zenity --info \
                 --title="Bodhi Update Utility" \
@@ -765,22 +777,7 @@ perform_silent_auto_update() {
                     fi
                 fi
 
-                local zen_response
-                zen_response=$(zenity --question \
-                    --title="Bodhi Update Utility" \
-                    --text="<span font='11' weight='bold'>System Updates Available</span>\n\nThere are <b>$TOTAL_COUNT</b> software updates ready for your Bodhi Linux system.$warning_text\n\nWould you like to install them now?" \
-                    --icon-name="software-update-available" \
-                    --ok-label="Install Now" \
-                    --cancel-label="Remind Me Later" \
-                    --extra-button="Show Details" \
-                    --width=450 2>/dev/null)
-                local exit_code=$?
-                
-                if [ "$zen_response" = "Show Details" ]; then
-                    show_details_dialog
-                elif [ $exit_code -eq 0 ]; then
-                    install_updates
-                fi
+                show_update_popup "$TOTAL_COUNT" "$warning_text"
             fi
         fi
     fi

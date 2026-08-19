@@ -29,11 +29,13 @@ mkdir -p "$BUILD_DIR/usr/lib/systemd/user"
 echo "-> Copying binaries..."
 cp "$BASE_DIR/bodhi-update-notifier.sh" "$BUILD_DIR/usr/bin/bodhi-update-notifier.sh"
 cp "$BASE_DIR/bodhi-update-settings.py" "$BUILD_DIR/usr/bin/bodhi-update-settings.py"
+cp "$BASE_DIR/bodhi-update-popup.py" "$BUILD_DIR/usr/bin/bodhi-update-popup.py"
 cp "$BASE_DIR/bodhi-update-tray.py" "$BUILD_DIR/usr/bin/bodhi-update-tray.py"
 
 # 3. Set strict file permissions (executable for binaries)
 chmod 755 "$BUILD_DIR/usr/bin/bodhi-update-notifier.sh"
 chmod 755 "$BUILD_DIR/usr/bin/bodhi-update-settings.py"
+chmod 755 "$BUILD_DIR/usr/bin/bodhi-update-popup.py"
 chmod 755 "$BUILD_DIR/usr/bin/bodhi-update-tray.py"
 
 # 4. Copy logo asset

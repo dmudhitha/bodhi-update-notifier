@@ -34,6 +34,10 @@ echo "-> Copying settings dashboard..."
 cp "$SCRIPT_DIR/bodhi-update-settings.py" "$INSTALL_DIR/bodhi-update-settings.py"
 chmod +x "$INSTALL_DIR/bodhi-update-settings.py"
 
+echo "-> Copying notification popup..."
+cp "$SCRIPT_DIR/bodhi-update-popup.py" "$INSTALL_DIR/bodhi-update-popup.py"
+chmod +x "$INSTALL_DIR/bodhi-update-popup.py"
+
 echo "-> Copying system tray applet..."
 cp "$SCRIPT_DIR/bodhi-update-tray.py" "$INSTALL_DIR/bodhi-update-tray.py"
 chmod +x "$INSTALL_DIR/bodhi-update-tray.py"
