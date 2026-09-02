@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 import subprocess
 import signal
 import gi
@@ -16,6 +17,7 @@ SHARE_DIR = os.path.expanduser("~/.local/share/bodhi-update-notifier")
 LOCK_FILE = f"/tmp/bodhi-update-notifier-{os.getuid()}.lock"
 UPDATES_LIST_FILE = os.path.join(SHARE_DIR, "updates.list")
 LOG_FILE = os.path.join(SHARE_DIR, "notifier.log")
+SNOOZE_FILE = os.path.join(SHARE_DIR, "snooze.until")
 
 # Get path to notifier script relative to this file
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +44,12 @@ class BodhiUpdateIndicator:
         self.item_install = Gtk.MenuItem(label="Install Updates Now")
         self.item_install.connect("activate", self.on_install_updates)
         self.menu.append(self.item_install)
+        
+        # Snooze Status / Cancel Snooze item
+        self.item_snooze = Gtk.MenuItem(label="Reminder Snoozed - Cancel")
+        self.item_snooze.connect("activate", self.on_cancel_snooze)
+        self.menu.append(self.item_snooze)
+        self.item_snooze.set_no_show_all(True)
         
         # Separator
         self.menu.append(Gtk.SeparatorMenuItem())
@@ -117,8 +125,23 @@ class BodhiUpdateIndicator:
                 pass
         return total_count, apt_count, flatpak_count, snap_count
 
+    def check_snooze(self):
+        if os.path.exists(SNOOZE_FILE):
+            try:
+                with open(SNOOZE_FILE, 'r') as f:
+                    snooze_until = int(f.read().strip())
+                now = int(time.time())
+                if snooze_until > now:
+                    return max(1, (snooze_until - now) // 60)
+                else:
+                    os.remove(SNOOZE_FILE)
+            except Exception:
+                pass
+        return 0
+
     def update_ui(self):
         total, apt, flat, snap = self.parse_updates()
+        mins_left = self.check_snooze()
         
         if total > 0:
             # Change icon to signify pending updates
@@ -128,6 +151,18 @@ class BodhiUpdateIndicator:
             self.item_details.set_sensitive(True)
             self.item_install.set_sensitive(True)
             self.item_details.set_label(f"Show Available Updates ({total})")
+            
+            if mins_left > 0:
+                if mins_left >= 60:
+                    hrs = mins_left // 60
+                    rem_m = mins_left % 60
+                    time_str = f"{hrs}h {rem_m}m" if rem_m else f"{hrs}h"
+                else:
+                    time_str = f"{mins_left}m"
+                self.item_snooze.set_label(f"Reminder Snoozed ({time_str} left) - Cancel")
+                self.item_snooze.show()
+            else:
+                self.item_snooze.hide()
         else:
             # Change icon to signify system is synchronized (up to date)
             self.indicator.set_icon_full("emblem-synchronized", "System Up to Date")
@@ -136,8 +171,28 @@ class BodhiUpdateIndicator:
             self.item_details.set_sensitive(False)
             self.item_install.set_sensitive(False)
             self.item_details.set_label("Show Available Updates (0)")
+            self.item_snooze.hide()
             
         return True
+
+    def on_cancel_snooze(self, widget):
+        if os.path.exists(SNOOZE_FILE):
+            try:
+                os.remove(SNOOZE_FILE)
+            except Exception:
+                pass
+        subprocess.Popen([
+            "notify-send", "-i", "software-update-available",
+            "Update Snooze Cancelled",
+            "Update notifications are resumed."
+        ])
+        pid = self.get_bash_pid()
+        if pid:
+            try:
+                os.kill(pid, signal.SIGUSR1)
+            except Exception:
+                pass
+        self.update_ui()
 
     def on_show_details(self, widget):
         # Trigger show details directly by invoking the bash script flag

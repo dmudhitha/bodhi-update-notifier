@@ -12,6 +12,7 @@ CONFIG_FILE="$HOME/.config/bodhi-update-notifier/config.conf"
 LOG_FILE="$HOME/.local/share/bodhi-update-notifier/notifier.log"
 LOCK_FILE="/tmp/bodhi-update-notifier-$UID.lock"
 UPDATES_LIST_FILE="$HOME/.local/share/bodhi-update-notifier/updates.list"
+SNOOZE_FILE="$HOME/.local/share/bodhi-update-notifier/snooze.until"
 
 # Default config variables
 CHECK_INTERVAL="4h"
@@ -250,6 +251,38 @@ is_quiet_hours() {
     return 1
 }
 
+# --- Feature 5b: Timed Snooze Check ---
+is_snoozed() {
+    if [ -f "$SNOOZE_FILE" ]; then
+        local snooze_until
+        snooze_until=$(cat "$SNOOZE_FILE" 2>/dev/null)
+        local now
+        now=$(date +%s)
+        if [ -n "$snooze_until" ] && [ "$now" -lt "$snooze_until" ]; then
+            return 0  # Snooze active
+        else
+            rm -f "$SNOOZE_FILE"
+            LAST_NOTIFIED_COUNT=0
+            return 1  # Snooze expired
+        fi
+    fi
+    return 1
+}
+
+get_snooze_remaining_seconds() {
+    if [ -f "$SNOOZE_FILE" ]; then
+        local snooze_until
+        snooze_until=$(cat "$SNOOZE_FILE" 2>/dev/null)
+        local now
+        now=$(date +%s)
+        if [ -n "$snooze_until" ] && [ "$snooze_until" -gt "$now" ]; then
+            echo $((snooze_until - now))
+            return 0
+        fi
+    fi
+    echo 0
+}
+
 # --- Standard execution checks ---
 
 parse_interval() {
@@ -337,6 +370,7 @@ REMAIN_COUNT=\$(apt-get -s upgrade 2>/dev/null | grep -E '^Inst ' | wc -l)
 
 if [ "\$REMAIN_COUNT" -eq 0 ]; then
     echo -n "" > "$UPDATES_LIST_FILE"
+    rm -f "$HOME/.local/share/bodhi-update-notifier/snooze.until"
     echo "✔ All updates were installed successfully with 0 errors! Your system is up to date."
 else
     echo "⚠️ Upgrade finished. \$REMAIN_COUNT package(s) still remaining."
@@ -395,6 +429,7 @@ EOF
                 if [ "$remain_count" -eq 0 ]; then
                     log_message "INFO" "Updates installed successfully with 0 remaining."
                     echo -n "" > "$UPDATES_LIST_FILE"
+                    rm -f "$SNOOZE_FILE"
                     if [ -f "$LOCK_FILE" ]; then
                         kill -SIGUSR1 $(cat "$LOCK_FILE" 2>/dev/null) 2>/dev/null || true
                     fi
@@ -743,51 +778,64 @@ perform_silent_auto_update() {
         if [ "$SILENT_AUTO_UPDATE" = "true" ]; then
             log_message "INFO" "Silent Auto-Update enabled. Performing automatic upgrade..."
             perform_silent_auto_update
+        elif is_snoozed; then
+            local rem_snooze=$(get_snooze_remaining_seconds)
+            log_message "INFO" "Updates available ($TOTAL_COUNT), but reminder is currently snoozed ($rem_snooze seconds remaining)."
         else
             # Ensure DISPLAY is set
             if [ -z "$DISPLAY" ]; then
                 export DISPLAY=":0.0"
             fi
         
-        # 4. Trigger Desktop Notification (if count changed)
-        if [ "$TOTAL_COUNT" -ne "$LAST_NOTIFIED_COUNT" ]; then
-            log_message "INFO" "Triggering desktop notification for $TOTAL_COUNT updates."
-            
-            local detail_msg="APT: $APT_COUNT"
-            [ "$FLATPAK_COUNT" -gt 0 ] && detail_msg="$detail_msg, Flatpak: $FLATPAK_COUNT"
-            [ "$SNAP_COUNT" -gt 0 ] && detail_msg="$detail_msg, Snap: $SNAP_COUNT"
-            
-            send_notification "System Updates Available" "There are $TOTAL_COUNT updates available ($detail_msg). Click the tray icon to install."
-            LAST_NOTIFIED_COUNT=$TOTAL_COUNT
-            
-            # Check for Quiet Hours (DND) before showing full blocking Zenity popup dialog
-            if is_quiet_hours; then
-                log_message "INFO" "Quiet Hours active. Blocking Zenity prompt skipped."
-            else
-                # Generate warning warnings if metered warning is active
-                local warning_text=""
-                if [ "$METERED_WARNING" = "true" ]; then
-                    local size_val=$(get_download_size_val_mb)
-                    local size_str=$(get_download_size_mb)
-                    
-                    if is_connection_metered; then
-                        warning_text="\n\n⚠️ <b>Metered Network Active!</b> Downloading updates over a metered connection may incur data charges."
-                    elif [ "$size_val" -ge "$METERED_THRESHOLD_MB" ]; then
-                        warning_text="\n\n⚠️ <b>Large Update Warning:</b> This update requires downloading <b>$size_str</b> of data."
+            # 4. Trigger Desktop Notification (if count changed or snooze expired)
+            if [ "$TOTAL_COUNT" -ne "$LAST_NOTIFIED_COUNT" ]; then
+                log_message "INFO" "Triggering desktop notification for $TOTAL_COUNT updates."
+                
+                local detail_msg="APT: $APT_COUNT"
+                [ "$FLATPAK_COUNT" -gt 0 ] && detail_msg="$detail_msg, Flatpak: $FLATPAK_COUNT"
+                [ "$SNAP_COUNT" -gt 0 ] && detail_msg="$detail_msg, Snap: $SNAP_COUNT"
+                
+                send_notification "System Updates Available" "There are $TOTAL_COUNT updates available ($detail_msg). Click the tray icon to install."
+                LAST_NOTIFIED_COUNT=$TOTAL_COUNT
+                
+                # Check for Quiet Hours (DND) before showing full blocking popup dialog
+                if is_quiet_hours; then
+                    log_message "INFO" "Quiet Hours active. Notification prompt suppressed."
+                else
+                    # Generate warning warnings if metered warning is active
+                    local warning_text=""
+                    if [ "$METERED_WARNING" = "true" ]; then
+                        local size_val=$(get_download_size_val_mb)
+                        local size_str=$(get_download_size_mb)
+                        
+                        if is_connection_metered; then
+                            warning_text="⚠️ <b>Metered Network Active!</b> Downloading updates over a metered connection may incur data charges."
+                        elif [ "$size_val" -ge "$METERED_THRESHOLD_MB" ]; then
+                            warning_text="⚠️ <b>Large Update Warning:</b> This update requires downloading <b>$size_str</b> of data."
+                        fi
                     fi
-                fi
 
-                show_update_popup "$TOTAL_COUNT" "$warning_text"
+                    show_update_popup "$TOTAL_COUNT" "$warning_text"
+                fi
             fi
         fi
-    fi
     else
         log_message "DEBUG" "No updates available. System is up to date."
         LAST_NOTIFIED_COUNT=0
+        rm -f "$SNOOZE_FILE"
+    fi
+
+    # Determine sleep duration: if snooze is active, sleep until snooze expires (or interval, whichever is smaller)
+    local current_sleep="$SLEEP_SECONDS"
+    if is_snoozed; then
+        local rem_snooze=$(get_snooze_remaining_seconds)
+        if [ "$rem_snooze" -gt 0 ] && [ "$rem_snooze" -lt "$current_sleep" ]; then
+            current_sleep="$rem_snooze"
+        fi
     fi
 
     # Sleep in background (allows signal interruption)
-    log_message "DEBUG" "Sleeping for $CHECK_INTERVAL ($SLEEP_SECONDS seconds)..."
-    sleep "$SLEEP_SECONDS" &
+    log_message "DEBUG" "Sleeping for $current_sleep seconds..."
+    sleep "$current_sleep" &
     wait $! 2>/dev/null || true
 done

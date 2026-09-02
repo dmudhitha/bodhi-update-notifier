@@ -22,6 +22,7 @@ A modern, lightweight, feature-packed software update manager and system tray no
 * **Post-Installation Verification**: Automatically verifies remaining updates after installation completes, ensuring 0 errors remain before clearing the update list.
 * **Bandwidth & Metered Network Protection**: Detects metered connections via `nmcli` and alerts you before downloading updates over configured download thresholds.
 * **Quiet Hours (DND)**: Configurable Quiet Hours interval (e.g., 21:00 to 08:00) during which desktop alerts and popup prompts are suppressed.
+* **Timed Snooze Reminders**: Dismiss notifications with a customizable snooze interval (30m, 1h, 2h, 4h, 24h). The daemon automatically wakes up and re-prompts when the snooze expires, and active snoozes can be monitored or cancelled directly from the system tray menu.
 * **Self-Healing & Package Manager Repair (`--repair`)**: One-click diagnostic tool to clear stale lock files (`/var/lib/dpkg/lock-frontend`) and fix broken dependencies.
 
 ---

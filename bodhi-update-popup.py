@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Bodhi Update Notifier - Graphical Update Prompt Popup
-Native GTK3 dialog offering Install Now, Show Details, and Remind Later actions.
+Native GTK3 dialog offering Install Now, Show Details, and Timed Snooze (Remind Later) actions.
 """
 
 import sys
 import os
+import time
+import signal
 import subprocess
 import gi
 
@@ -17,11 +19,23 @@ NOTIFIER_PATH = os.path.join(SCRIPT_DIR, "bodhi-update-notifier.sh")
 if not os.path.exists(NOTIFIER_PATH):
     NOTIFIER_PATH = "/usr/bin/bodhi-update-notifier.sh"
 
+STATE_DIR = os.path.expanduser("~/.local/share/bodhi-update-notifier")
+SNOOZE_FILE = os.path.join(STATE_DIR, "snooze.until")
+LOCK_FILE = f"/tmp/bodhi-update-notifier-{os.getuid()}.lock"
+
+SNOOZE_OPTIONS = [
+    ("30 minutes", 30 * 60),
+    ("1 hour", 60 * 60),
+    ("2 hours", 2 * 60 * 60),
+    ("4 hours", 4 * 60 * 60),
+    ("Tomorrow (24h)", 24 * 60 * 60)
+]
+
 class UpdateNotificationDialog(Gtk.Window):
     def __init__(self, total_count="1", extra_warning=""):
         super().__init__(title="Bodhi Update Utility")
         self.set_border_width(18)
-        self.set_default_size(480, 190)
+        self.set_default_size(520, 210)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_resizable(False)
         self.set_keep_above(True)
@@ -36,7 +50,7 @@ class UpdateNotificationDialog(Gtk.Window):
         main_box.pack_start(icon_box, False, False, 0)
 
         # Right Content Area
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         main_box.pack_start(content_box, True, True, 0)
 
         # Title Label
@@ -57,12 +71,29 @@ class UpdateNotificationDialog(Gtk.Window):
         lbl_msg.set_markup(msg_text)
         content_box.pack_start(lbl_msg, True, True, 0)
 
-        # Action Buttons Box
-        btn_box = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        # Bottom Bar: Snooze Dropdown & Action Buttons
+        bottom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        content_box.pack_end(bottom_box, False, False, 0)
+
+        # Snooze controls on the left
+        snooze_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        lbl_snooze = Gtk.Label(label="Snooze:")
+        snooze_box.pack_start(lbl_snooze, False, False, 0)
+
+        self.combo_snooze = Gtk.ComboBoxText()
+        for label, _ in SNOOZE_OPTIONS:
+            self.combo_snooze.append_text(label)
+        self.combo_snooze.set_active(1)  # Default: 1 hour
+        snooze_box.pack_start(self.combo_snooze, False, False, 0)
+        bottom_box.pack_start(snooze_box, False, False, 0)
+
+        # Action Buttons on the right
+        btn_box = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         btn_box.set_layout(Gtk.ButtonBoxStyle.END)
-        content_box.pack_end(btn_box, False, False, 0)
+        bottom_box.pack_end(btn_box, True, True, 0)
 
         btn_later = Gtk.Button(label="Remind Me Later")
+        btn_later.set_tooltip_text("Snooze reminder for the selected duration")
         btn_later.connect("clicked", self.on_remind_later)
         btn_box.add(btn_later)
 
@@ -86,6 +117,35 @@ class UpdateNotificationDialog(Gtk.Window):
         Gtk.main_quit()
 
     def on_remind_later(self, widget):
+        idx = self.combo_snooze.get_active()
+        if idx < 0 or idx >= len(SNOOZE_OPTIONS):
+            idx = 1
+        label, seconds = SNOOZE_OPTIONS[idx]
+
+        target_epoch = int(time.time()) + seconds
+        os.makedirs(STATE_DIR, exist_ok=True)
+        try:
+            with open(SNOOZE_FILE, 'w') as f:
+                f.write(str(target_epoch) + "\n")
+        except Exception as e:
+            print(f"Error saving snooze state: {e}")
+
+        # Show desktop notification toast
+        subprocess.Popen([
+            "notify-send", "-i", "software-update-available",
+            "Update Reminder Snoozed",
+            f"You will be reminded again in {label}."
+        ])
+
+        # Signal background daemon to recalculate sleep duration
+        if os.path.exists(LOCK_FILE):
+            try:
+                with open(LOCK_FILE, 'r') as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, signal.SIGUSR1)
+            except Exception:
+                pass
+
         self.destroy()
         Gtk.main_quit()
 
