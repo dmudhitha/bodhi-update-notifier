@@ -596,15 +596,49 @@ case "$1" in
         repair_package_manager
         exit 0
         ;;
+    --enable-silent-auto-update)
+        echo "Configuring passwordless permissions for Silent Auto-Updates..."
+        pkexec bash -c 'tmp=$(mktemp) && echo "'"$USER"' ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove" > "$tmp" && visudo -cf "$tmp" && cp "$tmp" /etc/sudoers.d/bodhi-update-notifier && chmod 0440 /etc/sudoers.d/bodhi-update-notifier && rm -f "$tmp"'
+        if [ $? -eq 0 ]; then
+            mkdir -p "$(dirname "$CONFIG_FILE")"
+            if [ -f "$CONFIG_FILE" ]; then
+                sed -i 's/SILENT_AUTO_UPDATE="false"/SILENT_AUTO_UPDATE="true"/' "$CONFIG_FILE"
+            fi
+            echo "✔ Silent Auto-Updates enabled successfully."
+            if [ -f "$LOCK_FILE" ]; then
+                kill -SIGUSR1 $(cat "$LOCK_FILE" 2>/dev/null) 2>/dev/null || true
+            fi
+        else
+            echo "❌ Failed to configure permissions."
+            exit 1
+        fi
+        exit 0
+        ;;
+    --disable-silent-auto-update)
+        echo "Disabling Silent Auto-Updates..."
+        if [ -f /etc/sudoers.d/bodhi-update-notifier ]; then
+            pkexec rm -f /etc/sudoers.d/bodhi-update-notifier
+        fi
+        if [ -f "$CONFIG_FILE" ]; then
+            sed -i 's/SILENT_AUTO_UPDATE="true"/SILENT_AUTO_UPDATE="false"/' "$CONFIG_FILE"
+        fi
+        echo "✔ Silent Auto-Updates disabled successfully."
+        if [ -f "$LOCK_FILE" ]; then
+            kill -SIGUSR1 $(cat "$LOCK_FILE" 2>/dev/null) 2>/dev/null || true
+        fi
+        exit 0
+        ;;
     --help|-h)
         echo "Usage: $0 [OPTION]"
         echo "Options:"
-        echo "  (none)            Start the background update checker daemon"
-        echo "  --check-now       Perform an interactive check with progress bar"
-        echo "  --show-details    Display the Zenity list of available updates"
-        echo "  --install-now     Launch the package upgrade terminal/GUI"
-        echo "  --settings        Show the GUI Settings form"
-        echo "  --repair          Launch package manager repairs in terminal"
+        echo "  (none)                         Start the background update checker daemon"
+        echo "  --check-now                    Perform an interactive check with progress bar"
+        echo "  --show-details                 Display the list of available updates"
+        echo "  --install-now                  Launch the package upgrade terminal/GUI"
+        echo "  --settings                     Show the GUI Settings form"
+        echo "  --repair                       Launch package manager repairs in terminal"
+        echo "  --enable-silent-auto-update    Configure passwordless permissions and enable auto-update"
+        echo "  --disable-silent-auto-update   Remove permissions and disable auto-update"
         exit 0
         ;;
 esac
@@ -735,10 +769,10 @@ perform_silent_auto_update() {
     # 1. Update APT
     if [ "$CHECK_APT" = "true" ]; then
         log_message "INFO" "Silent updating APT packages..."
-        if sudo -n apt-get upgrade -y >/dev/null 2>&1 && sudo -n apt-get autoremove -y >/dev/null 2>&1; then
+        if sudo -n apt-get dist-upgrade -y >/dev/null 2>&1 && sudo -n apt-get autoremove -y >/dev/null 2>&1; then
             log_message "INFO" "APT packages silently upgraded via passwordless sudo."
         elif command -v pkexec >/dev/null 2>&1; then
-            pkexec env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y >/dev/null 2>&1 || true
+            pkexec env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y >/dev/null 2>&1 || true
             pkexec env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y >/dev/null 2>&1 || true
         fi
     fi
@@ -826,16 +860,16 @@ perform_silent_auto_update() {
     fi
 
     # Determine sleep duration: if snooze is active, sleep until snooze expires (or interval, whichever is smaller)
-    local current_sleep="$SLEEP_SECONDS"
+    current_sleep="$SLEEP_SECONDS"
     if is_snoozed; then
-        local rem_snooze=$(get_snooze_remaining_seconds)
+        rem_snooze=$(get_snooze_remaining_seconds)
         if [ "$rem_snooze" -gt 0 ] && [ "$rem_snooze" -lt "$current_sleep" ]; then
             current_sleep="$rem_snooze"
         fi
     fi
 
     # Sleep in background (allows signal interruption)
-    log_message "DEBUG" "Sleeping for $current_sleep seconds..."
+    log_message "DEBUG" "Sleeping for $CHECK_INTERVAL ($current_sleep seconds)..."
     sleep "$current_sleep" &
     wait $! 2>/dev/null || true
 done

@@ -3,6 +3,7 @@
 import os
 import sys
 import signal
+import subprocess
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -16,7 +17,7 @@ class SettingsWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="Update Manager Preferences")
         self.set_border_width(15)
-        self.set_default_size(450, 420)
+        self.set_default_size(520, 520)
         self.set_position(Gtk.WindowPosition.CENTER)
         
         # Default config values
@@ -202,7 +203,9 @@ class SettingsWindow(Gtk.Window):
         grid.attach(lbl_silent, 0, row, 1, 1)
         
         self.check_silent = Gtk.CheckButton(label="Enable Silent Auto-Updates (Automatic background upgrade)")
-        self.check_silent.set_active(self.config.get("SILENT_AUTO_UPDATE", "false") == "true")
+        is_silent = self.config.get("SILENT_AUTO_UPDATE", "false") == "true" and os.path.exists("/etc/sudoers.d/bodhi-update-notifier")
+        self.check_silent.set_active(is_silent)
+        self.silent_toggle_handler_id = self.check_silent.connect("toggled", self.on_silent_toggled)
         grid.attach(self.check_silent, 1, row, 1, 1)
         row += 1
         
@@ -219,7 +222,47 @@ class SettingsWindow(Gtk.Window):
         btn_save.get_style_context().add_class("suggested-action")
         btn_save.connect("clicked", lambda w: self.save_config())
         button_box.add(btn_save)
+
+    def on_silent_toggled(self, widget):
+        rule_path = "/etc/sudoers.d/bodhi-update-notifier"
+        user = os.environ.get("USER", "mudhitha")
         
+        if widget.get_active():
+            # Enabling: Check if rule already exists
+            if not os.path.exists(rule_path):
+                cmd = [
+                    "pkexec", "bash", "-c",
+                    f'tmp=$(mktemp) && echo "{user} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove" > "$tmp" && visudo -cf "$tmp" && cp "$tmp" {rule_path} && chmod 0440 {rule_path} && rm -f "$tmp"'
+                ]
+                try:
+                    res = subprocess.run(cmd)
+                    if res.returncode != 0:
+                        # User cancelled authentication
+                        widget.handler_block(self.silent_toggle_handler_id)
+                        widget.set_active(False)
+                        widget.handler_unblock(self.silent_toggle_handler_id)
+                        return
+                except Exception as e:
+                    print(f"Error configuring sudoers rule: {e}")
+                    widget.handler_block(self.silent_toggle_handler_id)
+                    widget.set_active(False)
+                    widget.handler_unblock(self.silent_toggle_handler_id)
+                    return
+        else:
+            # Disabling: Remove rule if present
+            if os.path.exists(rule_path):
+                cmd = ["pkexec", "rm", "-f", rule_path]
+                try:
+                    res = subprocess.run(cmd)
+                    if res.returncode != 0:
+                        # User cancelled removal
+                        widget.handler_block(self.silent_toggle_handler_id)
+                        widget.set_active(True)
+                        widget.handler_unblock(self.silent_toggle_handler_id)
+                        return
+                except Exception as e:
+                    print(f"Error removing sudoers rule: {e}")
+
     def on_cancel(self):
         self.destroy()
         Gtk.main_quit()

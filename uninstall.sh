@@ -34,6 +34,10 @@ rm -f "$INSTALL_DIR/bodhi-update-settings.py"
 rm -f "$INSTALL_DIR/bodhi-update-popup.py"
 rm -f "$INSTALL_DIR/bodhi-update-tray.py"
 rm -f "/tmp/bodhi-update-notifier-*.lock"
+if [ -f "/etc/sudoers.d/bodhi-update-notifier" ]; then
+    echo "-> Removing auto-update sudoers rule..."
+    sudo rm -f "/etc/sudoers.d/bodhi-update-notifier" 2>/dev/null || pkexec rm -f "/etc/sudoers.d/bodhi-update-notifier" 2>/dev/null || true
+fi
 
 # 3. Reload systemd daemon
 echo "-> Reloading systemd user configuration..."
