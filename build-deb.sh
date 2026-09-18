@@ -116,8 +116,8 @@ cat <<EOF > "$BUILD_DIR/DEBIAN/postinst"
 #!/bin/sh
 set -e
 if [ "\$1" = "configure" ]; then
-    echo "Configuring passwordless apt-get update for silent background checks..."
-    echo "%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" > /etc/sudoers.d/bodhi-update-notifier
+    echo "Configuring passwordless apt-get permissions for updates..."
+    echo "%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove, /usr/bin/snap refresh" > /etc/sudoers.d/bodhi-update-notifier
     chmod 0440 /etc/sudoers.d/bodhi-update-notifier
 fi
 EOF

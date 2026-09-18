@@ -4,6 +4,7 @@ import os
 import sys
 import signal
 import subprocess
+import tempfile
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -66,7 +67,28 @@ class SettingsWindow(Gtk.Window):
         self.config["QUIET_HOURS_END"] = self.entry_qh_end.get_text().strip()
         self.config["METERED_WARNING"] = "true" if self.check_metered.get_active() else "false"
         self.config["METERED_THRESHOLD_MB"] = self.entry_metered_size.get_text().strip()
-        self.config["SILENT_AUTO_UPDATE"] = "true" if self.check_silent.get_active() else "false"
+        
+        if self.check_silent.get_active():
+            if not self.ensure_sudoers_rule(enable=True):
+                dialog = Gtk.MessageDialog(
+                    transient_for=self,
+                    flags=0,
+                    message_type=Gtk.MessageType.WARNING,
+                    buttons=Gtk.ButtonsType.OK,
+                    text="Silent Auto-Update Authentication Required"
+                )
+                dialog.format_secondary_text(
+                    "Administrator permissions were not granted. Silent Auto-Updates cannot run without passwordless permissions and has been disabled."
+                )
+                dialog.run()
+                dialog.destroy()
+                self.config["SILENT_AUTO_UPDATE"] = "false"
+                self.check_silent.set_active(False)
+            else:
+                self.config["SILENT_AUTO_UPDATE"] = "true"
+        else:
+            self.config["SILENT_AUTO_UPDATE"] = "false"
+            self.ensure_sudoers_rule(enable=False)
         
         # Write to file
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
@@ -203,7 +225,7 @@ class SettingsWindow(Gtk.Window):
         grid.attach(lbl_silent, 0, row, 1, 1)
         
         self.check_silent = Gtk.CheckButton(label="Enable Silent Auto-Updates (Automatic background upgrade)")
-        is_silent = self.config.get("SILENT_AUTO_UPDATE", "false") == "true" and os.path.exists("/etc/sudoers.d/bodhi-update-notifier")
+        is_silent = self.config.get("SILENT_AUTO_UPDATE", "false") == "true" and self.has_full_sudo()
         self.check_silent.set_active(is_silent)
         self.silent_toggle_handler_id = self.check_silent.connect("toggled", self.on_silent_toggled)
         grid.attach(self.check_silent, 1, row, 1, 1)
@@ -223,45 +245,63 @@ class SettingsWindow(Gtk.Window):
         btn_save.connect("clicked", lambda w: self.save_config())
         button_box.add(btn_save)
 
-    def on_silent_toggled(self, widget):
+    def has_full_sudo(self):
+        try:
+            res = subprocess.run(["sudo", "-n", "-l"], capture_output=True, text=True)
+            return "NOPASSWD" in res.stdout and "dist-upgrade" in res.stdout
+        except Exception:
+            return False
+
+    def ensure_sudoers_rule(self, enable=True):
         rule_path = "/etc/sudoers.d/bodhi-update-notifier"
         user = os.environ.get("USER", "mudhitha")
         
-        if widget.get_active():
-            # Enabling: Check if rule already exists
-            if not os.path.exists(rule_path):
-                cmd = [
-                    "pkexec", "bash", "-c",
-                    f'tmp=$(mktemp) && echo "{user} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove" > "$tmp" && visudo -cf "$tmp" && cp "$tmp" {rule_path} && chmod 0440 {rule_path} && rm -f "$tmp"'
-                ]
+        if enable:
+            if not self.has_full_sudo():
                 try:
+                    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+                        f.write("%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove, /usr/bin/snap refresh\n")
+                        f.write(f"{user} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove, /usr/bin/snap refresh\n")
+                        tmp_path = f.name
+                    
+                    os.chmod(tmp_path, 0o644)
+                    check = subprocess.run(["visudo", "-cf", tmp_path], capture_output=True, text=True)
+                    if check.returncode != 0:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                        return False
+                    
+                    cmd = ["pkexec", "bash", "-c", f"cp '{tmp_path}' '{rule_path}' && chmod 0440 '{rule_path}' && rm -f '{tmp_path}'"]
                     res = subprocess.run(cmd)
-                    if res.returncode != 0:
-                        # User cancelled authentication
-                        widget.handler_block(self.silent_toggle_handler_id)
-                        widget.set_active(False)
-                        widget.handler_unblock(self.silent_toggle_handler_id)
-                        return
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                    return res.returncode == 0 and self.has_full_sudo()
                 except Exception as e:
                     print(f"Error configuring sudoers rule: {e}")
-                    widget.handler_block(self.silent_toggle_handler_id)
-                    widget.set_active(False)
-                    widget.handler_unblock(self.silent_toggle_handler_id)
-                    return
+                    return False
+            return True
         else:
-            # Disabling: Remove rule if present
-            if os.path.exists(rule_path):
+            if os.path.exists(rule_path) or self.has_full_sudo():
                 cmd = ["pkexec", "rm", "-f", rule_path]
                 try:
                     res = subprocess.run(cmd)
-                    if res.returncode != 0:
-                        # User cancelled removal
-                        widget.handler_block(self.silent_toggle_handler_id)
-                        widget.set_active(True)
-                        widget.handler_unblock(self.silent_toggle_handler_id)
-                        return
+                    return res.returncode == 0
                 except Exception as e:
                     print(f"Error removing sudoers rule: {e}")
+                    return False
+            return True
+
+    def on_silent_toggled(self, widget):
+        if widget.get_active():
+            if not self.ensure_sudoers_rule(enable=True):
+                widget.handler_block(self.silent_toggle_handler_id)
+                widget.set_active(False)
+                widget.handler_unblock(self.silent_toggle_handler_id)
+        else:
+            if not self.ensure_sudoers_rule(enable=False):
+                widget.handler_block(self.silent_toggle_handler_id)
+                widget.set_active(True)
+                widget.handler_unblock(self.silent_toggle_handler_id)
 
     def on_cancel(self):
         self.destroy()
