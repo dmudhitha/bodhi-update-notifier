@@ -247,8 +247,8 @@ class SettingsWindow(Gtk.Window):
 
     def has_full_sudo(self):
         try:
-            res = subprocess.run(["sudo", "-n", "-l"], capture_output=True, text=True)
-            return "NOPASSWD" in res.stdout and "dist-upgrade" in res.stdout
+            res = subprocess.run(["sudo", "-n", "apt-get", "-s", "dist-upgrade"], capture_output=True, text=True)
+            return res.returncode == 0
         except Exception:
             return False
 
@@ -260,8 +260,9 @@ class SettingsWindow(Gtk.Window):
             if not self.has_full_sudo():
                 try:
                     with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-                        f.write("%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove, /usr/bin/snap refresh\n")
-                        f.write(f"{user} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove, /usr/bin/snap refresh\n")
+                        f.write('Defaults env_keep += "DEBIAN_FRONTEND"\n')
+                        f.write("%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/snap\n")
+                        f.write(f"{user} ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/snap\n")
                         tmp_path = f.name
                     
                     os.chmod(tmp_path, 0o644)

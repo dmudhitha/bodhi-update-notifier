@@ -598,7 +598,7 @@ case "$1" in
         ;;
     --enable-silent-auto-update)
         echo "Configuring passwordless permissions for Silent Auto-Updates..."
-        pkexec bash -c 'tmp=$(mktemp) && echo "'"$USER"' ALL=(ALL) NOPASSWD: /usr/bin/apt-get update, /usr/bin/apt-get upgrade, /usr/bin/apt-get dist-upgrade, /usr/bin/apt-get autoremove" > "$tmp" && visudo -cf "$tmp" && cp "$tmp" /etc/sudoers.d/bodhi-update-notifier && chmod 0440 /etc/sudoers.d/bodhi-update-notifier && rm -f "$tmp"'
+        pkexec bash -c 'tmp=$(mktemp) && printf "%s\n%s\n%s\n" "Defaults env_keep += \"DEBIAN_FRONTEND\"" "%sudo ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/snap" "'"$USER"' ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/snap" > "$tmp" && visudo -cf "$tmp" && cp "$tmp" /etc/sudoers.d/bodhi-update-notifier && chmod 0440 /etc/sudoers.d/bodhi-update-notifier && rm -f "$tmp"'
         if [ $? -eq 0 ]; then
             mkdir -p "$(dirname "$CONFIG_FILE")"
             if [ -f "$CONFIG_FILE" ]; then
@@ -769,11 +769,11 @@ perform_silent_auto_update() {
     # 1. Update APT
     if [ "$CHECK_APT" = "true" ]; then
         log_message "INFO" "Silent updating APT packages..."
-        if sudo -n apt-get dist-upgrade -y >/dev/null 2>&1 && sudo -n apt-get autoremove -y >/dev/null 2>&1; then
+        if DEBIAN_FRONTEND=noninteractive sudo -n apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" dist-upgrade >/dev/null 2>&1 && \
+           DEBIAN_FRONTEND=noninteractive sudo -n apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" autoremove >/dev/null 2>&1; then
             log_message "INFO" "APT packages silently upgraded via passwordless sudo."
-        elif command -v pkexec >/dev/null 2>&1; then
-            pkexec env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y >/dev/null 2>&1 || true
-            pkexec env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y >/dev/null 2>&1 || true
+        else
+            log_message "ERROR" "Silent APT upgrade failed or passwordless sudo not configured."
         fi
     fi
     
@@ -786,7 +786,11 @@ perform_silent_auto_update() {
     # 3. Update Snap
     if [ "$CHECK_SNAP" = "true" ] && command -v snap >/dev/null 2>&1; then
         log_message "INFO" "Silent updating Snap packages..."
-        sudo -n snap refresh >/dev/null 2>&1 || pkexec snap refresh >/dev/null 2>&1 || true
+        if sudo -n snap refresh >/dev/null 2>&1; then
+            log_message "INFO" "Snap packages silently refreshed."
+        else
+            log_message "WARNING" "Snap refresh failed or passwordless sudo not configured."
+        fi
     fi
     
     # 4. Verify post-update state
